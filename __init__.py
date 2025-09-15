@@ -1,0 +1,1 @@
+# Haier external component
