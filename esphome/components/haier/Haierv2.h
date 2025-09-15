@@ -11,9 +11,16 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
  public:
   Haier() : PollingComponent(2000) {}  // Poll every 2 seconds
 
+  // Declare UART component (must be configured in YAML)
+  void set_uart(UARTComponent *uart) { this->uart_ = uart; }
+
   void setup() override {
     ESP_LOGD("Haier", "Setting up Haier climate component...");
-    // Initialize UART or other communication here if needed
+    if (!this->uart_) {
+      ESP_LOGE("Haier", "UART component not set!");
+      this->mark_failed();
+      return;
+    }
   }
 
   void update() override {
@@ -72,11 +79,11 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
       auto new_mode = *call.get_mode();
       switch (new_mode) {
         case climate::CLIMATE_MODE_OFF:
-        case climate::CLIMATE_MODE_HEAT_COOL:
         case climate::CLIMATE_MODE_COOL:
         case climate::CLIMATE_MODE_HEAT:
         case climate::CLIMATE_MODE_DRY:
         case climate::CLIMATE_MODE_FAN_ONLY:
+        case climate::CLIMATE_MODE_HEAT_COOL:
         case climate::CLIMATE_MODE_AUTO:
           this->mode = new_mode;
           ESP_LOGD("Haier", "Setting mode to %d", this->mode);
@@ -103,7 +110,6 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
       auto new_fan_mode = *call.get_fan_mode();
       switch (new_fan_mode) {
         case climate::CLIMATE_FAN_OFF:
-        case climate::CLIMATE_FAN_ON:
         case climate::CLIMATE_FAN_LOW:
         case climate::CLIMATE_FAN_MEDIUM:
         case climate::CLIMATE_FAN_MIDDLE:
@@ -141,3 +147,128 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
     send_command();
     this->publish_state();
   }
+
+ protected:
+  UARTComponent *uart_ = nullptr;  // UART component for communication
+  uint8_t status[64];  // Placeholder for status array (adjust size as needed)
+  static const uint8_t TEMPERATURE_OFFSET = 0;  // Example offset
+  static const uint8_t SET_POINT_OFFSET = 1;   // Example offset
+  static const uint8_t MODE_OFFSET = 2;        // Example offset
+  static const uint8_t FAN_OFFSET = 3;         // Example offset
+  static const uint8_t SWING_OFFSET = 4;       // Example offset
+
+  void parse_status() {
+    ESP_LOGD("Haier", "Parsing AC status...");
+
+    // Placeholder: Read status from UART
+    // Example: if (!read_ac_status()) {
+    //   ESP_LOGW("Haier", "Failed to read AC status");
+    //   return;
+    // }
+    // For now, simulate status data
+    status[TEMPERATURE_OFFSET] = 45;  // Example: 22.5°C (45/2)
+    status[SET_POINT_OFFSET] = 8;    // Example: 24°C (8+16)
+    status[MODE_OFFSET] = 0x01;      // Example: Cool mode
+    status[FAN_OFFSET] = 0x04;       // Example: High fan
+    status[SWING_OFFSET] = 0x00;     // Example: Swing off
+
+    // Update temperature readings
+    this->current_temperature = status[TEMPERATURE_OFFSET] / 2.0f;
+    this->target_temperature = status[SET_POINT_OFFSET] + 16.0f;
+
+    // Update mode
+    switch (status[MODE_OFFSET]) {
+      case 0x00:
+        this->mode = climate::CLIMATE_MODE_OFF;
+        break;
+      case 0x01:
+        this->mode = climate::CLIMATE_MODE_COOL;
+        break;
+      case 0x02:
+        this->mode = climate::CLIMATE_MODE_HEAT;
+        break;
+      case 0x03:
+        this->mode = climate::CLIMATE_MODE_DRY;
+        break;
+      case 0x04:
+        this->mode = climate::CLIMATE_MODE_FAN_ONLY;
+        break;
+      case 0x05:
+        this->mode = climate::CLIMATE_MODE_HEAT_COOL;
+        break;
+      case 0x06:
+        this->mode = climate::CLIMATE_MODE_AUTO;
+        break;
+      default:
+        ESP_LOGW("Haier", "Unknown mode: %d", status[MODE_OFFSET]);
+        this->mode = climate::CLIMATE_MODE_OFF;
+        break;
+    }
+
+    // Update fan mode
+    switch (status[FAN_OFFSET]) {
+      case 0x01:
+        this->fan_mode = climate::CLIMATE_FAN_LOW;
+        break;
+      case 0x02:
+        this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
+        break;
+      case 0x03:
+        this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
+        break;
+      case 0x04:
+        this->fan_mode = climate::CLIMATE_FAN_HIGH;
+        break;
+      case 0x05:
+        this->fan_mode = climate::CLIMATE_FAN_AUTO;
+        break;
+      case 0x06:
+        this->fan_mode = climate::CLIMATE_FAN_FOCUS;
+        break;
+      case 0x07:
+        this->fan_mode = climate::CLIMATE_FAN_DIFFUSE;
+        break;
+      default:
+        ESP_LOGW("Haier", "Unknown fan mode: %d", status[FAN_OFFSET]);
+        this->fan_mode = climate::CLIMATE_FAN_LOW;
+        break;
+    }
+
+    // Update swing mode
+    switch (status[SWING_OFFSET]) {
+      case 0x00:
+        this->swing_mode = climate::CLIMATE_SWING_OFF;
+        break;
+      case 0x01:
+        this->swing_mode = climate::CLIMATE_SWING_BOTH;
+        break;
+      case 0x02:
+        this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+        break;
+      case 0x03:
+        this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+        break;
+      default:
+        ESP_LOGW("Haier", "Unknown swing mode: %d", status[SWING_OFFSET]);
+        this->swing_mode = climate::CLIMATE_SWING_OFF;
+        break;
+    }
+
+    this->publish_state();
+  }
+
+  void send_command() {
+    ESP_LOGD("Haier", "Sending command to AC: mode=%d, temp=%.1f, fan=%d, swing=%d",
+             this->mode, this->target_temperature, this->fan_mode, this->swing_mode);
+    // Placeholder: Implement UART command sending
+    // Example: if (this->uart_) {
+    //   uint8_t command[64] = {0};
+    //   command[0] = this->mode;
+    //   command[1] = (uint8_t)(this->target_temperature - 16);
+    //   this->uart_->write_array(command, sizeof(command));
+    // }
+  }
+};
+
+}  // namespace haier
+}  // namespace esphome
