@@ -1,6 +1,8 @@
 #pragma once
 
 #include "esphome.h"
+#include "esphome/components/climate/climate.h"
+#include "esphome/components/api/enums.pb.h"
 
 class Haier : public esphome::climate::Climate, public PollingComponent {
  public:
@@ -17,22 +19,22 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
 
     // Ondersteunde modes
     traits.set_supported_modes({
-        esphome::climate::CLIMATE_MODE_OFF,
-        esphome::climate::CLIMATE_MODE_COOL,
-        esphome::climate::CLIMATE_MODE_HEAT,
-        esphome::climate::CLIMATE_MODE_DRY,
-        esphome::climate::CLIMATE_MODE_FAN_ONLY,
-        esphome::climate::CLIMATE_MODE_HEAT_COOL,
-        esphome::climate::CLIMATE_MODE_AUTO
+        esphome::api::enums::CLIMATE_MODE_OFF,
+        esphome::api::enums::CLIMATE_MODE_COOL,
+        esphome::api::enums::CLIMATE_MODE_HEAT,
+        esphome::api::enums::CLIMATE_MODE_DRY,
+        esphome::api::enums::CLIMATE_MODE_FAN_ONLY,
+        esphome::api::enums::CLIMATE_MODE_HEAT_COOL,
+        esphome::api::enums::CLIMATE_MODE_AUTO
     });
 
     // Ondersteunde fan modes
     traits.set_supported_fan_modes({
-        esphome::climate::CLIMATE_FAN_OFF,
-        esphome::climate::CLIMATE_FAN_LOW,
-        esphome::climate::CLIMATE_FAN_MEDIUM,
-        esphome::climate::CLIMATE_FAN_HIGH,
-        esphome::climate::CLIMATE_FAN_AUTO
+        esphome::api::enums::CLIMATE_FAN_OFF,
+        esphome::api::enums::CLIMATE_FAN_LOW,
+        esphome::api::enums::CLIMATE_FAN_MEDIUM,
+        esphome::api::enums::CLIMATE_FAN_HIGH,
+        esphome::api::enums::CLIMATE_FAN_AUTO
     });
 
     // Swing modes
@@ -45,25 +47,27 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
   }
 
   void control(const esphome::climate::ClimateCall &call) override {
-    if (call.get_mode().has_value()) mode = *call.get_mode();
-    if (call.get_target_temperature().has_value()) target_temperature = *call.get_target_temperature();
-    if (call.get_fan_mode().has_value()) fan_mode = *call.get_fan_mode();
-    if (call.get_swing_mode().has_value()) swing_mode = *call.get_swing_mode();
-    publish_state();
+    if (call.get_mode().has_value()) {
+      this->mode_ = *call.get_mode();
+    }
+    if (call.get_target_temperature().has_value()) {
+      this->target_temperature_ = *call.get_target_temperature();
+    }
+    if (call.get_fan_mode().has_value()) {
+      this->fan_mode_ = *call.get_fan_mode();
+    }
+    if (call.get_swing_mode().has_value()) {
+      this->swing_mode_ = *call.get_swing_mode();
+    }
+    this->publish_state();
   }
 
  private:
-  float current_temperature{0};
-  float target_temperature{24};
-  esphome::climate::ClimateMode mode{esphome::climate::CLIMATE_MODE_OFF};
-  esphome::climate::ClimateFanMode fan_mode{esphome::climate::CLIMATE_FAN_AUTO};
-  esphome::climate::ClimateSwingMode swing_mode{esphome::climate::CLIMATE_SWING_OFF};
-
   void parse_status() {
-    // Hier je AC-status uitlezen en bovenstaande variabelen bijwerken
-    // Voorbeeld:
-    // current_temperature = sensor_value;
-    // target_temperature = ac_setpoint;
-    publish_state();
+    // Hier je AC-status uitlezen en ESPHome variabelen bijwerken
+    // Bijvoorbeeld:
+    // this->current_temperature_ = sensor_value;
+    // this->target_temperature_ = ac_setpoint;
+    this->publish_state();
   }
 };
