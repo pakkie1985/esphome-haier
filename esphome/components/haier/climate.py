@@ -3,11 +3,11 @@ import esphome.config_validation as cv
 from esphome.components import climate
 from esphome.const import CONF_NAME
 
-# Namespace en class verwijzing naar je C++ HaierV2
+# Namespace en C++ class
 haier_ns = cg.esphome_ns.namespace('haier_v2')
 HaierV2 = haier_ns.class_('HaierV2', climate.Climate, cg.PollingComponent)
 
-# Nieuwe manier voor schema
+# Nieuwe manier voor schema (ESPHome 2025.11+)
 CONFIG_SCHEMA = climate.climate_schema(HaierV2).extend({
     cv.Required(CONF_NAME): cv.string,
 })
