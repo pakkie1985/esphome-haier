@@ -1,47 +1,47 @@
+#pragma once
+
 #include "esphome.h"
 
-class Haier : public esphome::climate::Climate, public PollingComponent {
+using namespace esphome;
+using namespace esphome::climate;
+
+class Haier : public Climate, public PollingComponent {
  public:
-  void setup() override {
-    // Initialisatie
+  // Constructor
+  Haier() : PollingComponent(2000) {}  // poll elke 2 seconden
+
+  // Traits van je klimaat apparaat
+  ClimateTraits traits() override {
+    ClimateTraits t;
+    t.set_supports_current_temperature(true);
+    t.set_supports_target_temperature(true);
+    t.modes = {CLIMATE_MODE_OFF, CLIMATE_MODE_COOL, CLIMATE_MODE_HEAT,
+               CLIMATE_MODE_DRY, CLIMATE_MODE_FAN_ONLY, CLIMATE_MODE_HEAT_COOL, CLIMATE_MODE_AUTO};
+    t.fan_modes = {CLIMATE_FAN_OFF, CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM,
+                   CLIMATE_FAN_HIGH, CLIMATE_FAN_AUTO, CLIMATE_FAN_FOCUS, CLIMATE_FAN_DIFFUSE};
+    t.swing_modes = {CLIMATE_SWING_OFF, CLIMATE_SWING_VERTICAL, CLIMATE_SWING_HORIZONTAL, CLIMATE_SWING_BOTH};
+    t.min_temperature = 16.0f;
+    t.max_temperature = 30.0f;
+    t.supports_two_point_target_temperature = false;
+    return t;
   }
 
-  void loop() override {
-    // Eventuele periodieke code
+  // Polling functie
+  void update() override {
+    // Hier zou je status van de airco uitlezen via je protocol
+    // voorbeeld:
+    float current_temp = 22.5;  // dummywaarde
+    this->publish_state(current_temp);
   }
 
-  void parse_status() {
-    // Voorbeeld hoe je leden aanspreekt
-    this->current_temperature = status[TEMPERATURE_OFFSET] / 2;
-    this->target_temperature = status[SET_POINT_OFFSET] + 16;
-
-    switch(status[MODE_OFFSET]) {
-      case 0: this->mode = esphome::climate::CLIMATE_MODE_OFF; break;
-      case 1: this->mode = esphome::climate::CLIMATE_MODE_HEAT; break;
-      case 2: this->mode = esphome::climate::CLIMATE_MODE_COOL; break;
-      case 3: this->mode = esphome::climate::CLIMATE_MODE_AUTO; break;
-      case 4: this->mode = esphome::climate::CLIMATE_MODE_FAN_ONLY; break;
-      case 5: this->mode = esphome::climate::CLIMATE_MODE_DRY; break;
-    }
-
-    // Fan mode voorbeeld
-    this->fan_mode = esphome::climate::CLIMATE_FAN_AUTO; // pas aan op basis van status
-
-    // Swing mode voorbeeld
-    this->swing_mode = esphome::climate::CLIMATE_SWING_BOTH; // pas aan op basis van status
-
-    // State publiceren
-    this->publish_state();
-  }
-
-  void control(const esphome::climate::ClimateCall &call) override {
-    if (call.get_target_temperature().has_value()) {
-      float temp = *call.get_target_temperature();
-      this->set_target_temperature(temp);
-    }
-
+  // Controle functie
+  void control(const ClimateCall &call) override {
     if (call.get_mode().has_value()) {
       this->mode = *call.get_mode();
+    }
+
+    if (call.get_target_temperature().has_value()) {
+      this->set_target_temperature(*call.get_target_temperature());
     }
 
     if (call.get_fan_mode().has_value()) {
@@ -52,28 +52,6 @@ class Haier : public esphome::climate::Climate, public PollingComponent {
       this->swing_mode = *call.get_swing_mode();
     }
 
-    this->publish_state();
-  }
-
-  esphome::climate::ClimateTraits traits() override {
-    esphome::climate::ClimateTraits traits;
-    traits.set_supports_current_temperature(true);
-    traits.set_supports_two_point_target_temperature(false);
-    traits.set_supported_modes({esphome::climate::CLIMATE_MODE_OFF,
-                                esphome::climate::CLIMATE_MODE_COOL,
-                                esphome::climate::CLIMATE_MODE_HEAT,
-                                esphome::climate::CLIMATE_MODE_AUTO,
-                                esphome::climate::CLIMATE_MODE_DRY,
-                                esphome::climate::CLIMATE_MODE_FAN_ONLY});
-    traits.set_supported_fan_modes({esphome::climate::CLIMATE_FAN_OFF,
-                                    esphome::climate::CLIMATE_FAN_LOW,
-                                    esphome::climate::CLIMATE_FAN_MEDIUM,
-                                    esphome::climate::CLIMATE_FAN_HIGH,
-                                    esphome::climate::CLIMATE_FAN_AUTO});
-    traits.set_supported_swing_modes({esphome::climate::CLIMATE_SWING_OFF,
-                                      esphome::climate::CLIMATE_SWING_HORIZONTAL,
-                                      esphome::climate::CLIMATE_SWING_VERTICAL,
-                                      esphome::climate::CLIMATE_SWING_BOTH});
-    return traits;
+    this->publish_state();  // belangrijk: update Home Assistant
   }
 };
