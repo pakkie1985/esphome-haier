@@ -1,88 +1,79 @@
-#pragma once
-
 #include "esphome.h"
-#include "esphome/components/climate/climate.h"
-#include "esphome/components/climate/climate_traits.h"
 
-using namespace esphome;
-using namespace esphome::climate;
+class Haier : public esphome::climate::Climate, public PollingComponent {
+ public:
+  void setup() override {
+    // Initialisatie
+  }
 
-class Haier : public PollingComponent, public climate::Climate {
-public:
-    // Constructor
-    Haier() {}
+  void loop() override {
+    // Eventuele periodieke code
+  }
 
-    // Polling interval
-    void setup() override {
-        // Initialisatie bij opstarten
-        ESP_LOGD("Haier", "Setup complete");
+  void parse_status() {
+    // Voorbeeld hoe je leden aanspreekt
+    this->current_temperature = status[TEMPERATURE_OFFSET] / 2;
+    this->target_temperature = status[SET_POINT_OFFSET] + 16;
+
+    switch(status[MODE_OFFSET]) {
+      case 0: this->mode = esphome::climate::CLIMATE_MODE_OFF; break;
+      case 1: this->mode = esphome::climate::CLIMATE_MODE_HEAT; break;
+      case 2: this->mode = esphome::climate::CLIMATE_MODE_COOL; break;
+      case 3: this->mode = esphome::climate::CLIMATE_MODE_AUTO; break;
+      case 4: this->mode = esphome::climate::CLIMATE_MODE_FAN_ONLY; break;
+      case 5: this->mode = esphome::climate::CLIMATE_MODE_DRY; break;
     }
 
-    void loop() override {}
+    // Fan mode voorbeeld
+    this->fan_mode = esphome::climate::CLIMATE_FAN_AUTO; // pas aan op basis van status
 
-    // Traits (Wat deze climate component ondersteunt)
-    climate::ClimateTraits traits() override {
-        climate::ClimateTraits t;
-        t.set_supports_current_temperature(true);
-        t.set_supported_modes({
-            climate::CLIMATE_MODE_OFF,
-            climate::CLIMATE_MODE_COOL,
-            climate::CLIMATE_MODE_HEAT,
-            climate::CLIMATE_MODE_DRY,
-            climate::CLIMATE_MODE_FAN_ONLY,
-            climate::CLIMATE_MODE_AUTO
-        });
-        t.set_supported_fan_modes({
-            climate::CLIMATE_FAN_OFF,
-            climate::CLIMATE_FAN_ON,
-            climate::CLIMATE_FAN_LOW,
-            climate::CLIMATE_FAN_MEDIUM,
-            climate::CLIMATE_FAN_HIGH,
-            climate::CLIMATE_FAN_AUTO,
-            climate::CLIMATE_FAN_FOCUS,
-            climate::CLIMATE_FAN_DIFFUSE
-        });
-        t.set_supported_swing_modes({
-            climate::CLIMATE_SWING_OFF,
-            climate::CLIMATE_SWING_VERTICAL,
-            climate::CLIMATE_SWING_HORIZONTAL,
-            climate::CLIMATE_SWING_BOTH
-        });
-        return t;
+    // Swing mode voorbeeld
+    this->swing_mode = esphome::climate::CLIMATE_SWING_BOTH; // pas aan op basis van status
+
+    // State publiceren
+    this->publish_state();
+  }
+
+  void control(const esphome::climate::ClimateCall &call) override {
+    if (call.get_target_temperature().has_value()) {
+      float temp = *call.get_target_temperature();
+      this->set_target_temperature(temp);
     }
 
-    // Control functie: ontvangt commando's van Home Assistant
-    void control(const climate::ClimateCall &call) override {
-        if (call.get_mode().has_value()) {
-            mode = *call.get_mode();
-        }
-
-        if (call.get_target_temperature().has_value()) {
-            target_temperature = *call.get_target_temperature();
-        }
-
-        if (call.get_fan_mode().has_value()) {
-            fan_mode = *call.get_fan_mode();
-        }
-
-        if (call.get_swing_mode().has_value()) {
-            swing_mode = *call.get_swing_mode();
-        }
-
-        // Update state naar Home Assistant
-        this->publish_state();
+    if (call.get_mode().has_value()) {
+      this->mode = *call.get_mode();
     }
 
-    // Simuleer het uitlezen van status van AC (hier kan je eigen logica toevoegen)
-    void update() override {
-        // Stel hier current_temperature in, bijvoorbeeld van een sensor
-        current_temperature = 22.0; // voorbeeldwaarde
-        publish_state();
+    if (call.get_fan_mode().has_value()) {
+      this->fan_mode = *call.get_fan_mode();
     }
 
-private:
-    float target_temperature = 24.0;
-    climate::ClimateMode mode = climate::CLIMATE_MODE_OFF;
-    climate::ClimateFanMode fan_mode = climate::CLIMATE_FAN_AUTO;
-    climate::ClimateSwingMode swing_mode = climate::CLIMATE_SWING_OFF;
+    if (call.get_swing_mode().has_value()) {
+      this->swing_mode = *call.get_swing_mode();
+    }
+
+    this->publish_state();
+  }
+
+  esphome::climate::ClimateTraits traits() override {
+    esphome::climate::ClimateTraits traits;
+    traits.set_supports_current_temperature(true);
+    traits.set_supports_two_point_target_temperature(false);
+    traits.set_supported_modes({esphome::climate::CLIMATE_MODE_OFF,
+                                esphome::climate::CLIMATE_MODE_COOL,
+                                esphome::climate::CLIMATE_MODE_HEAT,
+                                esphome::climate::CLIMATE_MODE_AUTO,
+                                esphome::climate::CLIMATE_MODE_DRY,
+                                esphome::climate::CLIMATE_MODE_FAN_ONLY});
+    traits.set_supported_fan_modes({esphome::climate::CLIMATE_FAN_OFF,
+                                    esphome::climate::CLIMATE_FAN_LOW,
+                                    esphome::climate::CLIMATE_FAN_MEDIUM,
+                                    esphome::climate::CLIMATE_FAN_HIGH,
+                                    esphome::climate::CLIMATE_FAN_AUTO});
+    traits.set_supported_swing_modes({esphome::climate::CLIMATE_SWING_OFF,
+                                      esphome::climate::CLIMATE_SWING_HORIZONTAL,
+                                      esphome::climate::CLIMATE_SWING_VERTICAL,
+                                      esphome::climate::CLIMATE_SWING_BOTH});
+    return traits;
+  }
 };
