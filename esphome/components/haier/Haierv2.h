@@ -3,55 +3,77 @@
 #include "esphome.h"
 
 using namespace esphome;
-using namespace esphome::climate;
 
-class Haier : public Climate, public PollingComponent {
+class Haier : public climate::Climate, public PollingComponent {
  public:
-  // Constructor
-  Haier() : PollingComponent(2000) {}  // poll elke 2 seconden
+  // Constructor: update interval
+  Haier() : PollingComponent(10000) {}
 
-  // Traits van je klimaat apparaat
-  ClimateTraits traits() override {
-    ClimateTraits t;
-    t.set_supports_current_temperature(true);
-    t.set_supports_target_temperature(true);
-    t.modes = {CLIMATE_MODE_OFF, CLIMATE_MODE_COOL, CLIMATE_MODE_HEAT,
-               CLIMATE_MODE_DRY, CLIMATE_MODE_FAN_ONLY, CLIMATE_MODE_HEAT_COOL, CLIMATE_MODE_AUTO};
-    t.fan_modes = {CLIMATE_FAN_OFF, CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM,
-                   CLIMATE_FAN_HIGH, CLIMATE_FAN_AUTO, CLIMATE_FAN_FOCUS, CLIMATE_FAN_DIFFUSE};
-    t.swing_modes = {CLIMATE_SWING_OFF, CLIMATE_SWING_VERTICAL, CLIMATE_SWING_HORIZONTAL, CLIMATE_SWING_BOTH};
-    t.min_temperature = 16.0f;
-    t.max_temperature = 30.0f;
-    t.supports_two_point_target_temperature = false;
-    return t;
+  // Traits van de climate component
+  climate::ClimateTraits traits() override {
+    auto traits = climate::ClimateTraits();
+    traits.set_supports_current_temperature(true);
+    traits.set_supports_target_temperature(true);
+    traits.set_supports_fan_mode(true);
+    traits.set_supports_swing_mode(true);
+    traits.set_min_temperature(16);
+    traits.set_max_temperature(30);
+    traits.set_temperature_step(1);
+    traits.add_fan_mode(climate::FAN_OFF);
+    traits.add_fan_mode(climate::FAN_LOW);
+    traits.add_fan_mode(climate::FAN_MEDIUM);
+    traits.add_fan_mode(climate::FAN_HIGH);
+    traits.add_fan_mode(climate::FAN_AUTO);
+    traits.add_fan_mode(climate::FAN_FOCUS);
+    traits.add_fan_mode(climate::FAN_DIFFUSE);
+    traits.add_swing_mode(climate::SWING_OFF);
+    traits.add_swing_mode(climate::SWING_VERTICAL);
+    traits.add_swing_mode(climate::SWING_HORIZONTAL);
+    traits.add_swing_mode(climate::SWING_BOTH);
+    return traits;
   }
 
-  // Polling functie
+  // Polling loop: update state van AC
   void update() override {
-    // Hier zou je status van de airco uitlezen via je protocol
-    // voorbeeld:
-    float current_temp = 22.5;  // dummywaarde
-    this->publish_state(current_temp);
+    parse_status();
   }
 
-  // Controle functie
-  void control(const ClimateCall &call) override {
-    if (call.get_mode().has_value()) {
-      this->mode = *call.get_mode();
+  // Functie om status van AC uit te lezen (vul hier je protocol in)
+  void parse_status() {
+    // Voorbeeld: waarden van je AC uitlezen
+    // current_temperature_ = ...;
+    // target_temperature_ = ...;
+    // mode_ = ...;
+    // fan_mode_ = ...;
+    // swing_mode_ = ...;
+    publish_state();
+  }
+
+  // Controle van de climate component
+  void control(const climate::ClimateCall &call) override {
+    if (call.get_target_temperature().has_value()) {
+      target_temperature_ = *call.get_target_temperature();
     }
 
-    if (call.get_target_temperature().has_value()) {
-      this->set_target_temperature(*call.get_target_temperature());
+    if (call.get_mode().has_value()) {
+      mode_ = *call.get_mode();
     }
 
     if (call.get_fan_mode().has_value()) {
-      this->fan_mode = *call.get_fan_mode();
+      fan_mode_ = *call.get_fan_mode();
     }
 
     if (call.get_swing_mode().has_value()) {
-      this->swing_mode = *call.get_swing_mode();
+      swing_mode_ = *call.get_swing_mode();
     }
 
-    this->publish_state();  // belangrijk: update Home Assistant
+    // Hier kan je je code toevoegen om de AC fysiek aan te sturen
+    send_command_to_ac();
+    publish_state();
+  }
+
+ protected:
+  void send_command_to_ac() {
+    // Voeg hier je IR / seriële / wifi commando code toe
   }
 };
