@@ -1,278 +1,185 @@
 #pragma once
 
-#include "esphome.h"
+#include <chrono>
+#include <set>
 #include "esphome/components/climate/climate.h"
-#include "esphome/components/api/enums.pb.h"
 #include "esphome/components/uart/uart.h"
+#include "esphome/core/automation.h"
+// HaierProtocol
+#include <protocol/haier_protocol.h>
+
+#ifdef USE_SWITCH
+#include "esphome/components/switch/switch.h"
+#endif
 
 namespace esphome {
 namespace haier {
 
-class Haier : public esphome::climate::Climate, public PollingComponent {
+enum class ActionRequest : uint8_t {
+  SEND_CUSTOM_COMMAND = 0,
+  TURN_POWER_ON = 1,
+  TURN_POWER_OFF = 2,
+  TOGGLE_POWER = 3,
+  START_SELF_CLEAN = 4,   // only hOn
+  START_STERI_CLEAN = 5,  // only hOn
+};
+
+struct HaierBaseSettings {
+  bool health_mode;
+  bool display_state;
+};
+
+class HaierClimateBase : public esphome::Component,
+                         public esphome::climate::Climate,
+                         public esphome::uart::UARTDevice,
+                         public haier_protocol::ProtocolStream {
+#ifdef USE_SWITCH
  public:
-  Haier() : PollingComponent(2000) {}
-
-  void set_uart(esphome::uart::UARTComponent *uart) { this->uart_ = uart; }
-
-  void setup() override {
-    ESP_LOGD("Haier", "Opzetten van Haier climate component...");
-    if (!this->uart_) {
-      ESP_LOGE("Haier", "UART component niet ingesteld!");
-      this->mark_failed();
-      return;
-    }
-  }
-
-  void update() override {
-    ESP_LOGD("Haier", "Pollen van Haier AC status...");
-    parse_status();
-  }
-
-  esphome::climate::ClimateTraits traits() override {
-    esphome::climate::ClimateTraits traits;
-
-    traits.set_supported_modes({
-        esphome::api::enums::CLIMATE_MODE_OFF,
-        esphome::api::enums::CLIMATE_MODE_COOL,
-        esphome::api::enums::CLIMATE_MODE_HEAT,
-        esphome::api::enums::CLIMATE_MODE_DRY,
-        esphome::api::enums::CLIMATE_MODE_FAN_ONLY,
-        esphome::api::enums::CLIMATE_MODE_HEAT_COOL,
-        esphome::api::enums::CLIMATE_MODE_AUTO
-    });
-
-    traits.set_supported_fan_modes({
-        esphome::api::enums::CLIMATE_FAN_OFF,
-        esphome::api::enums::CLIMATE_FAN_LOW,
-        esphome::api::enums::CLIMATE_FAN_MEDIUM,
-        esphome::api::enums::CLIMATE_FAN_HIGH,
-        esphome::api::enums::CLIMATE_FAN_AUTO,
-        esphome::api::enums::CLIMATE_FAN_MIDDLE,
-        esphome::api::enums::CLIMATE_FAN_FOCUS,
-        esphome::api::enums::CLIMATE_FAN_DIFFUSE
-    });
-
-    traits.set_supported_swing_modes({
-        esphome::api::enums::CLIMATE_SWING_OFF,
-        esphome::api::enums::CLIMATE_SWING_VERTICAL,
-        esphome::api::enums::CLIMATE_SWING_HORIZONTAL,
-        esphome::api::enums::CLIMATE_SWING_BOTH
-    });
-
-    traits.set_supports_current_temperature(true);
-    traits.set_visual_min_temperature(16.0f);
-    traits.set_visual_max_temperature(30.0f);
-    traits.set_visual_temperature_step(1.0f);
-
-    return traits;
-  }
-
-  void control(const esphome::climate::ClimateCall &call) override {
-    ESP_LOGD("Haier", "Control oproep ontvangen");
-
-    esphome::api::enums::ClimateMode new_mode = esphome::api::enums::CLIMATE_MODE_OFF; // Default
-
-    if (call.get_mode().has_value()) {
-      new_mode = *call.get_mode();
-    }
-
-    // Logic uit je error-log: Switch voor mode, set command bytes (placeholder)
-    uint8_t command[20] = {0}; // Pas grootte aan aan protocol
-
-    switch (new_mode) {
-      case esphome::api::enums::CLIMATE_MODE_OFF:
-        command[POWER_OFFSET] = 0;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_HEAT_COOL:
-        command[MODE_OFFSET] = 5; // Voorbeeld, pas aan
-        command[POWER_OFFSET] = 1;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_HEAT:
-        command[MODE_OFFSET] = 1;
-        command[POWER_OFFSET] = 1;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_DRY:
-        command[MODE_OFFSET] = 2;
-        command[POWER_OFFSET] = 1;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_FAN_ONLY:
-        command[MODE_OFFSET] = 3;
-        command[POWER_OFFSET] = 1;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_COOL:
-        command[MODE_OFFSET] = 0;
-        command[POWER_OFFSET] = 1;
-        break;
-      case esphome::api::enums::CLIMATE_MODE_AUTO:
-        command[MODE_OFFSET] = 4;
-        command[POWER_OFFSET] = 1;
-        break;
-      default:
-        ESP_LOGW("Haier", "Niet ondersteunde mode: %d", new_mode);
-        return;
-    }
-
-    this->mode = new_mode;
-
-    if (call.get_target_temperature().has_value()) {
-      float temp = *call.get_target_temperature();
-      if (temp >= 16.0f && temp <= 30.0f) {
-        command[SET_POINT_OFFSET] = static_cast<uint8_t>(temp - 16);
-        this->target_temperature = temp;
-      } else {
-        ESP_LOGW("Haier", "Target temperatuur %.1f buiten bereik", temp);
-      }
-    }
-
-    if (call.get_fan_mode().has_value()) {
-      auto new_fan_mode = *call.get_fan_mode();
-      switch (new_fan_mode) {
-        case esphome::api::enums::CLIMATE_FAN_LOW:
-          command[FAN_OFFSET] = 1;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_MIDDLE:
-          command[FAN_OFFSET] = 3;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_MEDIUM:
-          command[FAN_OFFSET] = 2;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_HIGH:
-          command[FAN_OFFSET] = 4;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_AUTO:
-          command[FAN_OFFSET] = 5;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_ON:
-          command[FAN_OFFSET] = 6;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_OFF:
-          command[FAN_OFFSET] = 0;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_FOCUS:
-          command[FAN_OFFSET] = 7;
-          break;
-        case esphome::api::enums::CLIMATE_FAN_DIFFUSE:
-          command[FAN_OFFSET] = 8;
-          break;
-        default:
-          ESP_LOGW("Haier", "Niet ondersteunde fan mode: %d", new_fan_mode);
-          break;
-      }
-      this->fan_mode = new_fan_mode;
-    }
-
-    if (call.get_swing_mode().has_value()) {
-      auto new_swing_mode = *call.get_swing_mode();
-      switch (new_swing_mode) {
-        case esphome::api::enums::CLIMATE_SWING_OFF:
-          command[SWING_OFFSET] = 0;
-          break;
-        case esphome::api::enums::CLIMATE_SWING_VERTICAL:
-          command[SWING_OFFSET] = 2;
-          break;
-        case esphome::api::enums::CLIMATE_SWING_HORIZONTAL:
-          command[SWING_OFFSET] = 3;
-          break;
-        case esphome::api::enums::CLIMATE_SWING_BOTH:
-          command[SWING_OFFSET] = 1;
-          break;
-        default:
-          ESP_LOGW("Haier", "Niet ondersteunde swing mode: %d", new_swing_mode);
-          break;
-      }
-      this->swing_mode = new_swing_mode;
-    }
-
-    send_command(command);
-    this->publish_state();
-  }
+  void set_display_switch(switch_::Switch *sw);
+  void set_health_mode_switch(switch_::Switch *sw);
 
  protected:
-  esphome::uart::UARTComponent *uart_ = nullptr;
-  uint8_t status[20]; // Pas grootte aan aan protocol
+  switch_::Switch *display_switch_{nullptr};
+  switch_::Switch *health_mode_switch_{nullptr};
+#endif
+ public:
+  HaierClimateBase();
+  HaierClimateBase(const HaierClimateBase &) = delete;
+  HaierClimateBase &operator=(const HaierClimateBase &) = delete;
+  ~HaierClimateBase();
+  void setup() override;
+  void loop() override;
+  void control(const esphome::climate::ClimateCall &call) override;
+  void dump_config() override;
+  float get_setup_priority() const override { return esphome::setup_priority::HARDWARE; }
+  void set_display_state(bool state);
+  bool get_display_state() const;
+  void set_health_mode(bool state);
+  bool get_health_mode() const;
+  void send_power_on_command();
+  void send_power_off_command();
+  void toggle_power();
+  void reset_protocol() { this->reset_protocol_request_ = true; };
+  void set_supported_modes(const std::set<esphome::climate::ClimateMode> &modes);
+  void set_supported_swing_modes(const std::set<esphome::climate::ClimateSwingMode> &modes);
+  void set_supported_presets(const std::set<esphome::climate::ClimatePreset> &presets);
+  bool valid_connection() const { return this->protocol_phase_ >= ProtocolPhases::IDLE; };
+  size_t available() noexcept override { return esphome::uart::UARTDevice::available(); };
+  size_t read_array(uint8_t *data, size_t len) noexcept override {
+    return esphome::uart::UARTDevice::read_array(data, len) ? len : 0;
+  };
+  void write_array(const uint8_t *data, size_t len) noexcept override {
+    esphome::uart::UARTDevice::write_array(data, len);
+  };
+  bool can_send_message() const { return haier_protocol_.get_outgoing_queue_size() == 0; };
+  void set_answer_timeout(uint32_t timeout);
+  void set_send_wifi(bool send_wifi);
+  void send_custom_command(const haier_protocol::HaierMessage &message);
+  void add_status_message_callback(std::function<void(const char *, size_t)> &&callback);
 
-  static const uint8_t POWER_OFFSET = 0; // Voorbeeld offsets, pas aan
-  static const uint8_t MODE_OFFSET = 1;
-  static const uint8_t FAN_OFFSET = 2;
-  static const uint8_t SWING_OFFSET = 3;
-  static const uint8_t TEMPERATURE_OFFSET = 4;
-  static const uint8_t SET_POINT_OFFSET = 5;
+ protected:
+  enum class ProtocolPhases {
+    UNKNOWN = -1,
+    // INITIALIZATION
+    SENDING_INIT_1 = 0,
+    SENDING_INIT_2,
+    SENDING_FIRST_STATUS_REQUEST,
+    SENDING_FIRST_ALARM_STATUS_REQUEST,
+    // FUNCTIONAL STATE
+    IDLE,
+    SENDING_STATUS_REQUEST,
+    SENDING_UPDATE_SIGNAL_REQUEST,
+    SENDING_SIGNAL_LEVEL,
+    SENDING_CONTROL,
+    SENDING_ACTION_COMMAND,
+    SENDING_ALARM_STATUS_REQUEST,
+    NUM_PROTOCOL_PHASES
+  };
+  const char *phase_to_string_(ProtocolPhases phase);
+  virtual void set_handlers() = 0;
+  virtual void process_phase(std::chrono::steady_clock::time_point now) = 0;
+  virtual haier_protocol::HaierMessage get_control_message() = 0;          // NOLINT(readability-identifier-naming)
+  virtual haier_protocol::HaierMessage get_power_message(bool state) = 0;  // NOLINT(readability-identifier-naming)
+  virtual void save_settings();
+  virtual void initialization();
+  virtual bool prepare_pending_action();
+  virtual void process_protocol_reset();
+  esphome::climate::ClimateTraits traits() override;
+  // Answer handlers
+  haier_protocol::HandlerError answer_preprocess_(haier_protocol::FrameType request_message_type,
+                                                  haier_protocol::FrameType expected_request_message_type,
+                                                  haier_protocol::FrameType answer_message_type,
+                                                  haier_protocol::FrameType expected_answer_message_type,
+                                                  ProtocolPhases expected_phase);
+  haier_protocol::HandlerError report_network_status_answer_handler_(haier_protocol::FrameType request_type,
+                                                                     haier_protocol::FrameType message_type,
+                                                                     const uint8_t *data, size_t data_size);
+  // Timeout handler
+  haier_protocol::HandlerError timeout_default_handler_(haier_protocol::FrameType request_type);
+  // Helper functions
+  void send_message_(const haier_protocol::HaierMessage &command, bool use_crc, uint8_t num_repeats = 0,
+                     std::chrono::milliseconds interval = std::chrono::milliseconds::zero());
+  virtual void set_phase(ProtocolPhases phase);
+  void reset_phase_();
+  void reset_to_idle_();
+  bool is_message_interval_exceeded_(std::chrono::steady_clock::time_point now);
+  bool is_status_request_interval_exceeded_(std::chrono::steady_clock::time_point now);
+  bool is_control_message_interval_exceeded_(std::chrono::steady_clock::time_point now);
+  bool is_protocol_initialisation_interval_exceeded_(std::chrono::steady_clock::time_point now);
+#ifdef USE_WIFI
+  haier_protocol::HaierMessage get_wifi_signal_message_();
+#endif
 
-  void parse_status() {
-    ESP_LOGD("Haier", "Status van AC parsen...");
+  struct HvacSettings {
+    esphome::optional<esphome::climate::ClimateMode> mode;
+    esphome::optional<esphome::climate::ClimateFanMode> fan_mode;
+    esphome::optional<esphome::climate::ClimateSwingMode> swing_mode;
+    esphome::optional<float> target_temperature;
+    esphome::optional<esphome::climate::ClimatePreset> preset;
+    bool valid;
+    HvacSettings() : valid(false){};
+    HvacSettings(const HvacSettings &) = default;
+    HvacSettings &operator=(const HvacSettings &) = default;
+    void reset();
+  };
+  struct PendingAction {
+    ActionRequest action;
+    esphome::optional<haier_protocol::HaierMessage> message;
+  };
+  enum class SwitchState {
+    OFF = 0b00,
+    ON = 0b01,
+    PENDING_OFF = 0b10,
+    PENDING_ON = 0b11,
+  };
+  haier_protocol::ProtocolHandler haier_protocol_;
+  ProtocolPhases protocol_phase_;
+  esphome::optional<PendingAction> action_request_;
+  uint8_t fan_mode_speed_;
+  uint8_t other_modes_fan_speed_;
+  SwitchState display_status_{SwitchState::ON};
+  SwitchState health_mode_{SwitchState::OFF};
+  bool force_send_control_;
+  bool forced_request_status_;
+  bool reset_protocol_request_;
+  bool send_wifi_signal_;
+  bool use_crc_;
+  esphome::climate::ClimateTraits traits_;
+  HvacSettings current_hvac_settings_;
+  HvacSettings next_hvac_settings_;
+  std::unique_ptr<uint8_t[]> last_status_message_{nullptr};
+  std::chrono::steady_clock::time_point last_request_timestamp_;       // For interval between messages
+  std::chrono::steady_clock::time_point last_valid_status_timestamp_;  // For protocol timeout
+  std::chrono::steady_clock::time_point last_status_request_;          // To request AC status
+  std::chrono::steady_clock::time_point last_signal_request_;          // To send WiFI signal level
+  CallbackManager<void(const char *, size_t)> status_message_callback_{};
+  ESPPreferenceObject base_rtc_;
+};
 
-    // Lees status via UART (implementeer dit, bijv. met checksum)
-    if (this->uart_ && this->uart_->available()) {
-      this->uart_->read_array(status, sizeof(status));
-    } else {
-      ESP_LOGW("Haier", "Geen status beschikbaar");
-      return;
-    }
-
-    this->current_temperature = status[TEMPERATURE_OFFSET] / 2.0f;
-    this->target_temperature = status[SET_POINT_OFFSET] + 16.0f;
-
-    // Mode logic uit je error-log (aangepast aan switch)
-    if (status[POWER_OFFSET] == 0) {
-      this->mode = esphome::api::enums::CLIMATE_MODE_OFF;
-    } else {
-      uint8_t mode_byte = status[MODE_OFFSET];
-      if (mode_byte == 0) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_AUTO; // Voorbeeld
-      } else if (mode_byte == 1) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_COOL;
-      } else if (mode_byte == 2) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_HEAT;
-      } else if (mode_byte == 3) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_DRY;
-      } else if (mode_byte == 4) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_FAN_ONLY;
-      } else if (mode_byte == 5) {
-        this->mode = esphome::api::enums::CLIMATE_MODE_HEAT_COOL;
-      } else {
-        this->mode = esphome::api::enums::CLIMATE_MODE_AUTO;
-      }
-    }
-
-    // Fan mode logic (aangepast aan switch)
-    uint8_t fan_byte = status[FAN_OFFSET];
-    if (fan_byte == 1) {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_LOW;
-    } else if (fan_byte == 2) {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_MEDIUM;
-    } else if (fan_byte == 3) {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_HIGH;
-    } else if (fan_byte == 4) {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_AUTO;
-    } else if (fan_byte == 5) {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_MIDDLE;
-    } else {
-      this->fan_mode = esphome::api::enums::CLIMATE_FAN_AUTO;
-    }
-
-    // Swing mode logic
-    uint8_t swing_byte = status[SWING_OFFSET];
-    if (swing_byte == 0) {
-      this->swing_mode = esphome::api::enums::CLIMATE_SWING_OFF;
-    } else if (swing_byte == 1) {
-      this->swing_mode = esphome::api::enums::CLIMATE_SWING_BOTH;
-    } else if (swing_byte == 2) {
-      this->swing_mode = esphome::api::enums::CLIMATE_SWING_HORIZONTAL;
-    } else if (swing_byte == 3) {
-      this->swing_mode = esphome::api::enums::CLIMATE_SWING_VERTICAL;
-    } else {
-      this->swing_mode = esphome::api::enums::CLIMATE_SWING_OFF;
-    }
-
-    this->publish_state();
-  }
-
-  void send_command(uint8_t command[]) {
-    // Voeg checksum toe als nodig, dan verstuur via UART
-    ESP_LOGD("Haier", "Commando sturen...");
-    if (this->uart_) {
-      this->uart_->write_array(command, sizeof(command));
-    }
+class StatusMessageTrigger : public Trigger<const char *, size_t> {
+ public:
+  explicit StatusMessageTrigger(HaierClimateBase *parent) {
+    parent->add_status_message_callback([this](const char *data, size_t data_size) { this->trigger(data, data_size); });
   }
 };
 
