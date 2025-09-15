@@ -7,10 +7,10 @@ from esphome.const import CONF_NAME
 haier_ns = cg.esphome_ns.namespace('haier_v2')
 HaierV2 = haier_ns.class_('HaierV2', climate.Climate, cg.PollingComponent)
 
-# Config schema voor ESPHome
-CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend({
+# Nieuwe manier voor schema
+CONFIG_SCHEMA = climate.climate_schema(HaierV2).extend({
     cv.Required(CONF_NAME): cv.string,
-}).extend(climate.CLIMATE_SCHEMA)
+})
 
 def to_code(config):
     var = cg.new_Pvariable(config[CONF_NAME])
